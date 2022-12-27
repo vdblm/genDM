@@ -16,11 +16,11 @@ class RatioModel(nn.Module):
     r_{phi}(v) = exp(f_{phi}(v)) / (1/m sum_{i=1}^m exp(f_{phi}(v_i))).
     """
 
-    # model configuration. Has the following keys: 'features', 'activation', 'momentum', 'stable_eps'
+    # model configuration. Has the following keys: 'features', 'activation'
     config: ConfigDict
 
     @nn.compact
-    def __call__(self, x, train: bool = False):
+    def __call__(self, x, train: bool = False, update_stats: bool = True):
         is_initialized = self.has_variable("batch_stats", "mean")
 
         # running average mean
@@ -33,7 +33,7 @@ class RatioModel(nn.Module):
             mean = ra_mean.value
         else:
             mean = jnp.mean(exp_f, axis=0)  # TODO use pmean with `batch` axis_name if we use vmap
-            if is_initialized:
+            if is_initialized and update_stats:
                 ra_mean.value = self.config.momentum * ra_mean.value + (1.0 - self.config.momentum) * mean
 
         # normalize the model
@@ -41,11 +41,21 @@ class RatioModel(nn.Module):
 
 
 class CPM(nn.Module):
-    """Conditional Probability Model. It returns log(p_{theta}(t|x))"""
+    """Conditional Probability Model. It returns log(p_{theta}(t|x)).
+    For now, we consider a simple Gaussian model with fixed variance.
+    """
 
-    # model configuration
+    # model configuration. Has the following keys: 'condition_dim', 'decision_dim', 'features', 'activation'
     config: ConfigDict
 
     @nn.compact
-    def __call__(self, conditions, decision):
-        raise NotImplementedError  # TODO implement this
+    def __call__(self, conditions, decision):  # TODO double check
+        log_sigma = self.param('log_sigma', nn.initializers.zeros, (1, self.config.decision_dim))
+        assert self.config.features[0] == self.config.condition_dim
+        assert self.config.features[-1] == self.config.decision_dim
+        mu_x = MLP(features=self.config.features, activiation=self.config.activation)(conditions)
+        return (
+                - 0.5 * jnp.sum((decision - mu_x) ** 2 / jnp.exp(log_sigma), axis=1, keepdims=True)
+                - 0.5 * jnp.sum(log_sigma, axis=1, keepdims=True)
+                - 0.5 * self.config.decision_dim * jnp.log(2 * jnp.pi)
+        )
