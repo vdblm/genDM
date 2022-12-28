@@ -1,14 +1,17 @@
+# Copyright (c) 2022, Vahid Balazadeh Meresht
+# MIT License
+
 from typing import Callable
 import jax.numpy as jnp
 import numpy as np
 
-from dags import DAG
+from util.scms import SCM
 
 
-def output_loss(dag: DAG, target_var: int) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    start_idx, end_idx = np.sum(dag.var_dims[target_var]), np.sum(dag.var_dims[target_var + 1])
+def y2_loss(scm: SCM) -> Callable[[jnp.ndarray], jnp.ndarray]:
+    start_idx, end_idx = np.sum(scm.dag.var_dims[:scm.target]), np.sum(scm.dag.var_dims[:(scm.target + 1)])
 
     def loss_fn(batch: jnp.ndarray) -> jnp.ndarray:
-        return batch[:, start_idx:end_idx]
+        return jnp.mean(batch[:, start_idx:end_idx] ** 2, axis=1, keepdims=True)
 
     return loss_fn

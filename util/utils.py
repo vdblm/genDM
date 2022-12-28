@@ -1,13 +1,11 @@
-from abc import ABC
-
 import jax.random
 import jax.numpy as jnp
 
-from types import Params, Variables, OptState
-from typing import Callable
+from util.commons import Variables
+from typing import List
 
-from optimizer import Optimizer
-from flax import struct
+from util.optimizer import Optimizer
+from flax.training import train_state
 
 
 class ConfigDict(dict):
@@ -33,53 +31,19 @@ class PRNGSequence:
         return n
 
 
-class TrainState(struct.PyTreeNode, ABC):
-    step: int
-    apply_fn: Callable
-    params: Params
+class TrainState(train_state.TrainState):
     state: Variables
-    opt: Optimizer
-    opt_state: OptState
-
-    def apply_gradients(self, *, grads, **kwargs):
-        new_params, new_opt_state = self.opt.opt_update(grads, self.opt_state, self.params)
-
-        return self.replace(
-            step=self.step + 1,
-            params=new_params,
-            opt_state=new_opt_state,
-            **kwargs,
-        )
-
-    @classmethod
-    def create(cls, *, apply_fn, params, opt, **kwargs):
-        opt_state = opt.opt_init(params)
-        return cls(
-            step=0,
-            apply_fn=apply_fn,
-            params=params,
-            opt=opt,
-            opt_state=opt_state,
-            **kwargs,
-        )
 
 
-def create_state(rng, model_cls, model_config, optimizer_config, input_shape):
+def create_state(rng, model_cls, model_config, optimizer_config, input_shapes: List):
     model = model_cls(model_config)
     optimizer = Optimizer(optimizer_config)
-    variables = model.init(rng, jnp.ones(input_shape))
+    variables = model.init(rng, *[jnp.ones(i) for i in input_shapes])
     state, params = variables.pop("params")
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
         state=state,
-        opt=optimizer,
+        tx=optimizer.optimizer,
     )
     return state
-
-    # def _get_treatment_parents(self, batch: jnp.ndarray) -> jnp.ndarray:
-    #     variables = self.dag.get_obs_parents(self.gc.treatment) + [self.gc.treatment]
-    #     idx = np.array(
-    #         [np.arange(np.sum(self.dag.var_dims[:i]), np.sum(self.dag.var_dims[:(i + 1)])) for i in variables]
-    #     ).flatten()
-    #     return batch[:, idx]

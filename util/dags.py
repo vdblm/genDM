@@ -1,3 +1,6 @@
+# Copyright (c) 2022, Vahid Balazadeh Meresht
+# MIT License
+
 from collections import OrderedDict
 from itertools import chain
 from typing import List

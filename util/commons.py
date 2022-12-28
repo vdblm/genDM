@@ -1,16 +1,20 @@
-# Copyright (c) 2022, Vahid Balazadeh Meresht
-# MIT License
-
 from collections import OrderedDict
-from typing import Callable, Sequence, Any, Tuple, Dict
+from typing import Callable, Sequence, Tuple, Dict
 
 import flax.linen as nn
 
-from dags import DAG
+from util.dags import DAG
 
 import jax.numpy as jnp
 
+from typing import Any
+import optax
+
 PRNGKey = Any
+Params = Any
+Variables = Any
+OptState = optax.OptState
+
 Shape = Tuple[int, ...]
 Dtype = Any
 Array = Any
@@ -40,7 +44,7 @@ class CausalGenerator(nn.Module):
     interventional model to generate.
     """
     causal_graph: DAG
-    obs_models: Dict[nn.Module]
+    obs_models: dict
 
     @nn.compact
     def __call__(self, z, interventions: Dict[int, nn.Module]):
