@@ -22,19 +22,24 @@ Array = Any
 
 class MLP(nn.Module):
     features: Sequence[int]
-    kernel_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.orthogonal()
-    bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.zeros
+    kernel_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.xavier_uniform()
+    bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.normal(stddev=1)
     activation: str = 'relu'
 
     @nn.compact
     def __call__(self, x):
         if self.activation == 'relu':
             activation_fn = nn.relu
+        elif self.activation == 'gelu':
+            activation_fn = nn.gelu
+        elif self.activation == 'tanh':
+            activation_fn = nn.tanh
         else:
             raise ValueError(f"Expected relu, got {self.activation}")
-        for feat in self.features:
+        for i, feat in enumerate(self.features):
             x = nn.Dense(features=feat, kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
-            x = activation_fn(x)
+            if i != len(self.features) - 1:
+                x = activation_fn(x)
         return x
 
 

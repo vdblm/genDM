@@ -3,6 +3,7 @@
 
 import flax
 import flax.linen as nn
+import jax.lax
 import jax.numpy as jnp
 
 from util.utils import ConfigDict
@@ -24,22 +25,23 @@ class RatioModel(nn.Module):
         is_initialized = self.has_variable("batch_stats", "mean")
 
         # running average mean
-        ra_mean = self.variable("batch_stats", "mean", lambda s: jnp.ones(s),
-                                x.shape[1:])  # type: flax.core.scope.Variable
+        ra_mean = self.variable("batch_stats", "mean",
+                                lambda s: jnp.ones(s),
+                                self.config['features'][-1])  # type: flax.core.scope.Variable
 
-        exp_f = jnp.exp(
-            MLP(features=self.config['features'], activation=self.config['activation'])(
-                x))  # create the model using config
+        # create the model using config
+        f = MLP(features=self.config['features'], activation=self.config['activation'])(x)
 
-        if not train:
-            mean = ra_mean.value
-        else:
+        exp_f = nn.sigmoid(f)  # TODO we may use exp(f) instead of sigmoid(f) to avoid zero grads
+
+        mean = ra_mean.value
+
+        if train:
             mean = jnp.mean(exp_f, axis=0)  # TODO use pmean with `batch` axis_name if we use vmap
             if is_initialized and update_stats:
                 ra_mean.value = self.config['momentum'] * ra_mean.value + (1.0 - self.config['momentum']) * mean
 
-        # normalize the model
-        return exp_f / (mean + self.config['stable_eps'])
+        return exp_f / (mean + self.config['stable_eps'])  # normalize the model
 
 
 class CPM(nn.Module):
@@ -47,12 +49,15 @@ class CPM(nn.Module):
     For now, we consider a simple Gaussian model with fixed variance.
     """
 
-    # model configuration. Has the following keys: 'condition_dim', 'decision_dim', 'features', 'activation'
+    # model configuration. Has the following keys: 'condition_dim', 'decision_dim', 'features', 'activation', 'variance'
     config: ConfigDict
 
     @nn.compact
     def __call__(self, conditions, decision):  # TODO double check
-        log_sigma = self.param('log_sigma', nn.initializers.zeros, (1, self.config['decision_dim']))
+        if self.config['variance'] is None:
+            log_sigma = self.param('log_sigma', nn.initializers.zeros, (1, self.config['decision_dim']))
+        else:
+            log_sigma = jnp.log(self.config['variance'] * jnp.ones((1, self.config['decision_dim'])))
         assert self.config['features'][0] == self.config['condition_dim']
         assert self.config['features'][-1] == self.config['decision_dim']
         mu_x = MLP(features=self.config['features'], activation=self.config['activation'])(conditions)
@@ -61,3 +66,53 @@ class CPM(nn.Module):
                 - 0.5 * jnp.sum(log_sigma, axis=1, keepdims=True)
                 - 0.5 * self.config['decision_dim'] * jnp.log(2 * jnp.pi)
         )
+
+
+def test_ratio_model():
+    from util.utils import create_state, TrainState, PRNGSequence
+    import tqdm
+    model_conf = ConfigDict(
+        {
+            'features': [1, 32, 32, 1],
+            'activation': 'tanh',
+            'momentum': 0.9,
+            'stable_eps': 1e-5
+        }
+    )
+
+    opt_conf = ConfigDict(
+        {
+            'learning_rate': 1e-2,
+            'optimizer': 'adam',
+            'epochs': 2000
+        }
+    )
+    rng = PRNGSequence(2539)
+    data = jax.random.normal(next(rng), (100, 1)) * 2 + 2
+
+    model_state = create_state(next(rng), RatioModel, model_conf, opt_conf, [(1, 1)])
+
+    @jax.jit
+    def _update_step(state: TrainState, batch):
+        def loss_fn(params):
+            r, avg = state.apply_fn(
+                {'params': params, **state.state},
+                batch,
+                mutable=list(state.state.keys()),
+                train=True)
+            return - jnp.mean(r * batch), (avg, {'expected_r': jnp.mean(r)})
+
+        (loss, (stats, out)), grad = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
+        new_state = state.apply_gradients(grads=grad, state=stats)
+        out['loss'] = loss
+        out['mean_raw'] = new_state.state['batch_stats']['mean']
+        return new_state, out
+
+    with tqdm.tqdm(total=opt_conf.epochs) as pbar:
+        for epoch in range(opt_conf.epochs):
+            model_state, output = _update_step(model_state, data)
+            logging_str = ' '.join(['{}: {:.4f}'.format(k, v.item()) for (k, v) in output.items()])
+            pbar.set_postfix_str(logging_str)
+            pbar.update(1)
+    assert jnp.isclose(-output['loss'], jnp.max(data),
+                       atol=1e-2), "The model should be able to learn the max of the data"
