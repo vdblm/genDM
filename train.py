@@ -17,14 +17,14 @@ def train(config: ConfigDict):
     dl = NumpyLoader(JaxDataset(scm.generate(next(rng), config.gc.n_samples)), batch_size=config.gc.batch_size)
 
     # MLE for log p_true(t|x)
-    mle_trainer = MLETrainer(config.gc, config.dmc, config.doc)
+    mle_trainer = MLETrainer(config.gc, config.mle_config, config.doc)
     mle_trainer.initialize(next(rng))
     with tqdm.tqdm(total=config.gc.MLE_epochs) as pbar:
         for epoch in range(config.gc.MLE_epochs):
             for batch in dl:
                 outputs = mle_trainer.train_step(next(rng), batch)
             logging_str = ' '.join(
-                ['{}: {: <12g}'.format(k, v) for (k, v) in outputs.items()]) if outputs is not None else ''
+                ['{}: {: <10g}'.format(k, v) for (k, v) in outputs.items()]) if outputs is not None else ''
             pbar.set_postfix_str(logging_str)
             pbar.update(1)
 
@@ -38,14 +38,18 @@ def train(config: ConfigDict):
     dl = NumpyLoader(JaxDataset(scm.data), batch_size=config.gc.batch_size)  # Reload the data
     minmax_trainer.initialize(next(rng))
     with tqdm.tqdm(total=config.gc.epochs) as pbar:
-        for epoch in range(config.gc.epochs):
-            for batch in dl:
-                outputs = minmax_trainer.train_step(next(rng), batch)
-                print(outputs)
-            logging_str = ' '.join(
-                ['{}: {: <12g}'.format(k, v) for (k, v) in outputs.items()]) if outputs is not None else ''
-            pbar.set_postfix_str(logging_str)
-            pbar.update(1)
+        with tqdm.tqdm(total=config.gc.epochs) as dbar:
+            for epoch in range(config.gc.epochs):
+                for batch in dl:
+                    outputs, debug = minmax_trainer.train_step(next(rng), batch)
+                logging_str = ' '.join(['{}: {: .4f}'.format(k, v) for (k, v) in outputs.items()])
+                pbar.set_postfix_str(logging_str)
+                pbar.update(1)
+                if config.gc.debug:
+                    debug_str = ' '.join(['{}: {: .4f}'.format(k, v) for (k, v) in debug.items()])
+                    dbar.set_postfix_str(debug_str)
+                    dbar.update(1)
+                    # TODO 1. Negative KL, 2. Check if the learned policy is optimal, 3. Save and load models
 
 
 if __name__ == '__main__':

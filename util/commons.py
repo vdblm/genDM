@@ -35,7 +35,7 @@ class MLP(nn.Module):
         elif self.activation == 'tanh':
             activation_fn = nn.tanh
         else:
-            raise ValueError(f"Expected relu, got {self.activation}")
+            raise ValueError(f"Expected a valid activation, got {self.activation}")
         for i, feat in enumerate(self.features):
             x = nn.Dense(features=feat, kernel_init=self.kernel_init, bias_init=self.bias_init)(x)
             if i != len(self.features) - 1:

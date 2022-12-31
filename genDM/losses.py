@@ -12,6 +12,7 @@ def y2_loss(scm: SCM) -> Callable[[jnp.ndarray], jnp.ndarray]:
     start_idx, end_idx = np.sum(scm.dag.var_dims[:scm.target]), np.sum(scm.dag.var_dims[:(scm.target + 1)])
 
     def loss_fn(batch: jnp.ndarray) -> jnp.ndarray:
-        return jnp.mean(batch[:, start_idx:end_idx] ** 2, axis=1, keepdims=True)
+        raw_output = jnp.mean(batch[:, start_idx:end_idx] ** 2, axis=1, keepdims=True)
+        return raw_output / jnp.mean(raw_output)  # normalize for numerical stability
 
     return loss_fn
