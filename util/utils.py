@@ -34,6 +34,10 @@ class PRNGSequence:
 class TrainState(train_state.TrainState):
     state: Variables
 
+    def init_opt_state(self):  # Initializes the optimizer state. TODO make sure it's correct
+        new_opt_state = self.tx.init(self.params)
+        return self.replace(opt_state=new_opt_state)
+
 
 def create_state(rng, model_cls, model_config, optimizer_config, input_shapes: List):
     model = model_cls(model_config)

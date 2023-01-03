@@ -39,9 +39,9 @@ class SCM:
 def linear_backdoor():
     def generate(key: PRNGKey, n_samples: int) -> np.ndarray:
         keys = jax.random.split(key, 3)
-        x = jax.random.normal(key=keys[0], shape=(n_samples, 1)) * 2 + 1
-        t = x + 2 + jax.random.normal(keys[1], shape=(n_samples, 1)) * 3
-        y = - x + 3 * t + jax.random.normal(keys[2], shape=(n_samples, 1)) * 2
+        x = 1 + jax.random.normal(key=keys[0], shape=(n_samples, 1))
+        t = x + 2 + jax.random.normal(keys[1], shape=(n_samples, 1))
+        y = - x + 3 * t + jax.random.normal(keys[2], shape=(n_samples, 1))
         data = np.array(jnp.concatenate([x, t, y], axis=-1), dtype=jnp.float32)
         return data
 
@@ -54,3 +54,4 @@ def gen_scm(key: str) -> SCM:
     return {
         'linear_backdoor': linear_backdoor(),
     }[key]
+
