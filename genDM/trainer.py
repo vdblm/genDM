@@ -51,7 +51,7 @@ class MinMaxTrainer:  # TODO Check for gpus
                                             (1, self.dmc.decision_dim)])  # type: TrainState
 
         self.adversary_state = create_state(akey, RatioModel, self.amc, self.aoc,
-                                            [(1, self.amc.features[0])])  # type: TrainState
+                                            [(1, self.amc.input_dim)])  # type: TrainState
 
         @jax.jit
         def _update_step(key: PRNGKey, decision_state: TrainState, adversary_state: TrainState,
@@ -120,13 +120,15 @@ class MinMaxTrainer:  # TODO Check for gpus
             (_, (r_phi, new_adv_state, new_lag_multiplier)), decision_grads = (
                 jax.value_and_grad(_gradient_descent, has_aux=True)(decision_state.params)
             )
-            new_decision_state = decision_state.apply_gradients(grads=decision_grads)
-            _, (_, outputs, debugs) = _inner_loss_fn(new_decision_state.params, new_adv_state.params,
-                                                     new_lag_multiplier)
+            _, (_, outputs, debugs) = _inner_loss_fn(decision_state.params, new_adv_state.params,
+                                                     new_lag_multiplier)  # We output the stats before updating theta
+
             # decision_grads = jax.tree_map(lambda x: jnp.mean(x), decision_grads)
             # debugs['theta_grads'] = decision_grads
             debugs['max_r_phi'] = jnp.max(r_phi)
             debugs['mean_r_raw'] = jnp.mean(new_adv_state.state['batch_stats']['mean'])
+
+            new_decision_state = decision_state.apply_gradients(grads=decision_grads)
             return new_decision_state, new_adv_state, new_lag_multiplier, outputs, debugs
 
         @jax.jit
@@ -150,6 +152,7 @@ class MinMaxTrainer:  # TODO Check for gpus
         self.decision_state, self.adversary_state, self.lagrange_multiplier, outputs, debug = self._update_step(
             key, self.decision_state, self.adversary_state, self.lagrange_multiplier, batch
         )
+        # print(debug.pop('theta_grads'))
         return outputs, debug
 
     def eval_step(self, key: PRNGKey, batch: jnp.ndarray):
@@ -219,6 +222,7 @@ def test_MLE():
     import numpy as np
     from util.utils import PRNGSequence
     import tqdm
+    import matplotlib.pyplot as plt
 
     gc = ConfigDict(
         {
@@ -229,11 +233,11 @@ def test_MLE():
     )
     dmc = ConfigDict(
         {
-            'features': [1, 32, 32, 1],  # without input/output
+            'features': [32, 32, 1],  # without input/output
             'activation': 'tanh',
             'condition_dim': 1,
             'decision_dim': 1,
-            'variance': 1.
+            'variance': None
         }
     )
 
@@ -246,8 +250,8 @@ def test_MLE():
     rng = PRNGSequence(38488)
     mle_trainer = MLETrainer(gc, dmc, doc)
     mle_trainer.initialize(next(rng))
-    data_x = jax.random.normal(next(rng), (100, 1))
-    data_t = jax.random.normal(next(rng), (100, 1)) + 2 * data_x
+    data_x = jax.random.normal(next(rng), (1000, 1))
+    data_t = jax.random.normal(next(rng), (1000, 1)) + 2 * data_x
     data = jnp.concatenate([data_x, data_t], axis=1)
     with tqdm.tqdm(total=gc.epochs) as pbar:
         for epoch in range(gc.epochs):
@@ -261,3 +265,8 @@ def test_MLE():
     assert jnp.isclose(1.,
                        p_t_x(jnp.linspace(interval[0], interval[1], 100)).mean() * (interval[1] - interval[0]),
                        atol=1e-2), "Integral of p(t|x) should be 1."
+
+    mu_x = mle_trainer.decision_state.apply_fn({'params': mle_trainer.decision_state.params}, data_x, method=CPM.mu)
+    plt.plot(data_x, mu_x, 'o')
+    plt.savefig('outputs/mle.png')
+    plt.close()

@@ -13,6 +13,6 @@ def y2_loss(scm: SCM) -> Callable[[jnp.ndarray], jnp.ndarray]:
 
     def loss_fn(batch: jnp.ndarray) -> jnp.ndarray:
         raw_output = jnp.mean(batch[:, start_idx:end_idx] ** 2, axis=1, keepdims=True)
-        return raw_output / jnp.mean(raw_output)  # normalize for numerical stability
+        return raw_output  # TODO maybe normalize it
 
     return loss_fn

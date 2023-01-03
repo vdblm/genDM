@@ -5,8 +5,10 @@ from util.dataset import JaxDataset, NumpyLoader
 
 from genDM.trainer import MLETrainer, MinMaxTrainer
 from genDM.losses import y2_loss
+from genDM.models import CPM
 
 import tqdm
+import matplotlib.pyplot as plt
 
 
 def train(config: ConfigDict):
@@ -49,8 +51,18 @@ def train(config: ConfigDict):
                     debug_str = ' '.join(['{}: {: .4f}'.format(k, v) for (k, v) in debug.items()])
                     dbar.set_postfix_str(debug_str)
                     dbar.update(1)
-                    # TODO 1. Negative KL, 2. Check if the learned policy is optimal, 3. Save and load models
+                    # TODO 1. The raw mean in ratio model goes to zero,
+                    #      2. Check if the learned policy is optimal,
+                    #      3. Save and load models
+
+    mu_x = minmax_trainer.decision_state.apply_fn({'params': minmax_trainer.decision_state.params},
+                                                  scm.data[:, config.gc.batch_condition_dims],
+                                                  method=CPM.mu)
+    plt.plot(scm.data[:, config.gc.batch_condition_dims], mu_x, 'o')
+    plt.savefig('outputs/learned_policy.png')
+    plt.close()
 
 
 if __name__ == '__main__':
     train(train_config)
+
