@@ -41,7 +41,7 @@ def linear_backdoor():
         keys = jax.random.split(key, 3)
         x = 1 + jax.random.normal(key=keys[0], shape=(n_samples, 1))
         t = x + 2 + jax.random.normal(keys[1], shape=(n_samples, 1))
-        y = - x + 3 * t + jax.random.normal(keys[2], shape=(n_samples, 1))
+        y = (- x + 3 * t + jax.random.normal(keys[2], shape=(n_samples, 1))) / 10
         data = np.array(jnp.concatenate([x, t, y], axis=-1), dtype=jnp.float32)
         return data
 

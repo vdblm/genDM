@@ -7,7 +7,7 @@ from functools import partial
 
 
 # Adapted from Jonathan Lorraine, et al. https://arxiv.org/pdf/1911.02590.pdf (Algorithm 2, 3)
-@partial(jax.jit, static_argnums=(0, 1, 4))
+@partial(jax.jit, static_argnums=(0, 1, 4, 5))
 def hypergradient(val_loss: Callable[[Params], Any], train_loss: Callable[[Params, Params], Any],
                   params: Params, hyperparams: Params, inverse_steps: int, lr: float):
     """
@@ -27,17 +27,17 @@ def hypergradient(val_loss: Callable[[Params], Any], train_loss: Callable[[Param
         """Approximate the inverse Hessian-vector product v [df/dw]^{-1}."""
         p = v
         for j in range(inverse_steps):
-            v -= lr * jax.vjp(f, params)[1](v)[0]
-            p += v
+            v = jax.tree_util.tree_map(lambda x, y: x - lr * y, v, jax.vjp(f, params)[1](v)[0])
+            p = jax.tree_util.tree_map(lambda x, y: x + y, p, v)
         return p
 
     v1 = jax.grad(val_loss)(params)
     d_train_d_w = lambda w: jax.grad(train_loss, argnums=0)(w, hyperparams)
     v2 = approx_inverse_HVP(v1, d_train_d_w)  # [dval/dw] · [d^2train/dw^2]^{-1}
-    d_train_d_hyper = lambda w: jax.grad(train_loss, argnums=1)(w, hyperparams)
-    v3 = jax.vjp(d_train_d_hyper, params)[1](v2)[0]  # [dval/dw] · [d^2train/dw^2]^{-1} · [d^2train/dw dλ]
+    d_train_d_w_2 = lambda hyper: jax.grad(train_loss, argnums=0)(params, hyper)
+    v3 = jax.vjp(d_train_d_w_2, hyperparams)[1](v2)[0]  # [dval/dw] · [d^2train/dw^2]^{-1} · [d^2train/dw dλ]
 
-    return - v3
+    return jax.tree_util.tree_map(lambda x: -x, v3)
 
 
 def test_hyper_gradient():
@@ -73,4 +73,3 @@ def test_hyper_gradient():
             pbar.update(1)
 
     assert jnp.isclose(init_param, 1., atol=1e-4), "The optimal param should be 1."
-

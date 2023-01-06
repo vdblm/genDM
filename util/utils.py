@@ -1,7 +1,7 @@
 import jax.random
 import jax.numpy as jnp
 
-from util.commons import Variables
+from util.commons import Variables, Params
 from typing import List
 
 from util.optimizer import Optimizer
@@ -32,22 +32,29 @@ class PRNGSequence:
 
 
 class TrainState(train_state.TrainState):
-    state: Variables
+    stats: Variables
+    init_stats: Variables
+    init_params: Params
 
     def init_opt_state(self):  # Initializes the optimizer state. TODO make sure it's correct
         new_opt_state = self.tx.init(self.params)
         return self.replace(opt_state=new_opt_state)
+
+    def init_param_state(self):
+        return self.replace(stats=self.init_stats, params=self.init_params)
 
 
 def create_state(rng, model_cls, model_config, optimizer_config, input_shapes: List):
     model = model_cls(model_config)
     optimizer = Optimizer(optimizer_config)
     variables = model.init(rng, *[jnp.ones(i) for i in input_shapes])
-    state, params = variables.pop("params")
+    stats, params = variables.pop("params")
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        state=state,
+        stats=stats,
         tx=optimizer.optimizer,
+        init_stats=stats,
+        init_params=params
     )
     return state
