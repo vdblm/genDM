@@ -11,6 +11,8 @@ from util.utils import ConfigDict, TrainState, create_state
 from genDM.models import RatioModel, CPM
 from genDM.hypergradients import hypergradient
 
+from collections import defaultdict
+
 
 class MinMaxTrainer:  # TODO Check for gpus
     """Training the generative Causal Decision-Making. It solves the following constrained optimization:
@@ -40,8 +42,8 @@ class MinMaxTrainer:  # TODO Check for gpus
         self._update_step = None
         self._eval_fn = None
 
-        self.train_metrics = {}
-        self.eval_metrics = {}
+        self.train_metrics = defaultdict[list]
+        self.eval_metrics = defaultdict[list]
 
         self.base_lagrange_multiplier = jnp.array(0., dtype=jnp.float32)
 
@@ -194,10 +196,10 @@ class OptimalAdvTrainer:
         self._update_step = None
         self._eval_fn = None
 
-        self.train_metrics = {}
-        self.eval_metrics = {}
+        self.train_metrics = defaultdict(list)
+        self.eval_metrics = defaultdict(list)
 
-        self.lagrange_multiplier = jnp.array(0., dtype=jnp.float32)
+        self.lagrange_multiplier = jnp.array(5., dtype=jnp.float32)
 
     def initialize(self, rng: PRNGKey):
         dkey, akey = jax.random.split(rng)
@@ -212,17 +214,20 @@ class OptimalAdvTrainer:
 
             log_p_true = self.log_p_true(batch[:, self.gc.batch_condition_dims],
                                          batch[:, self.gc.batch_decision_dims])  # args: conditions, decision
-            loss = (
+            loss = jnp.exp(
                     lagrange_param
-                    * jnp.log(jnp.exp(self.loss(batch) / lagrange_param) * jnp.exp(log_pi_theta - log_p_true)).mean()
+                    * jnp.log(jnp.exp(self.loss(batch) / lagrange_param + log_pi_theta - log_p_true).mean())
                     + lagrange_param * self.gc.alpha
             )
-            return loss
+            outputs = {'log_pi_theta': log_pi_theta.mean(), 'loss': loss, 'lagrange_param': lagrange_param}
+            return loss, outputs
 
         @jax.jit
         def _update_step(key: PRNGKey, decision_state: TrainState, lagrange_mult: jnp.ndarray, batch: jnp.ndarray):
-            loss, (decision_grads, lagrange_grads) = jax.value_and_grad(loss_fn, argnums=(0, 1))(decision_state.params,
-                                                                                                 lagrange_mult, batch)
+            (decision_grads, lagrange_grads), outputs = (
+                jax.grad(loss_fn, argnums=(0, 1), has_aux=True)(decision_state.params,
+                                                                lagrange_mult, batch)
+            )
 
             new_lagrange_params = lagrange_mult - self.gc.lagrange_lr * lagrange_grads
 
@@ -230,18 +235,27 @@ class OptimalAdvTrainer:
             new_lagrange_params = jnp.minimum(new_lagrange_params, self.gc.max_lambda)
 
             new_decision_state = decision_state.apply_gradients(grads=decision_grads)
-
-            outputs = {'loss': loss, 'lagrange_mult': lagrange_mult}
-            return new_decision_state, outputs
+            debug = {}
+            return new_decision_state, new_lagrange_params, outputs, debug
 
         self._update_step = _update_step
 
+    def _update_metrics(self, metrics: dict, is_train: bool):
+        if is_train:
+            for k, v in metrics.items():
+                self.train_metrics[k].append(float(v))
+        else:
+            for k, v in metrics.items():
+                self.eval_metrics[k].append(float(v))
+
     def train_step(self, key: PRNGKey, batch: jnp.ndarray) -> Tuple[dict, ...]:
-        self.decision_state, outputs, _ = self._update_step(key,
-                                                            self.decision_state,
-                                                            self.lagrange_multiplier,
-                                                            batch)
-        return outputs, {}
+        self.decision_state, self.lagrange_multiplier, outputs, debug = self._update_step(key,
+                                                                                          self.decision_state,
+                                                                                          self.lagrange_multiplier,
+                                                                                          batch)
+        self._update_metrics(outputs, is_train=True)
+
+        return outputs, debug
 
 
 class MLETrainer:
